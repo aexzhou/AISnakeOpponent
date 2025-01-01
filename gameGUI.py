@@ -1,16 +1,27 @@
+import pygame
+import queue
+import asyncio
+from time import sleep
+from config import *
+
 class Gui:
     """
         This class handles all GUI-related processing. 
         It's rendering is controlled by the GameEngine class,
         which contains the main game rendering loop.
     """
-    def __init__(self):
+    def __init__(self, gameQueue : queue.Queue, inputQueue : queue.Queue):
         """        
             The initializer instantiates the main window and 
             creates the starting icons for the snake and the prey,
             and displays the initial player score.
         """
-        # These are some GUI Constants
+        pygame.init()
+
+        self.queue = gameQueue
+        self.inputQueue = inputQueue
+
+        # some GUI Constants
         self.scoreTextXLocation = 60
         self.scoreTextYLocation = 15
         textColour = (255, 255, 255)
@@ -21,10 +32,13 @@ class Gui:
         self.font = pygame.font.SysFont("Arial", 20, bold=True)
         self.textColour = textColour
         self.backgroundColor = BACKGROUND_COLOUR 
-        # The snakeCoordinates are delivered from the instantiated Game class.
-        self.snakeCoordinates = game.playerSnake.coordinates 
+
         self.preyCoordinates = None
+        # get init info from snake
+        self.getGameInitInfo()
+        
         self.score = 0
+
         self.screen.fill(self.backgroundColor)
 
         pygame.display.update() # Update the screen to show the latest staged object results
@@ -68,6 +82,12 @@ class Gui:
         score_surface = self.font.render(f"Your Score: {self.score}", True, self.textColour)
         self.screen.blit(score_surface, (self.scoreTextXLocation, self.scoreTextYLocation))
 
+    def drawScreenGrid(self) -> None:
+        for i in range (0, WINDOW_WIDTH, RESOLUTION):
+                    pygame.draw.line(self.screen, "blue", [i, 0],[i, WINDOW_HEIGHT],1)
+        for j in range (0, WINDOW_HEIGHT, RESOLUTION):
+                pygame.draw.line(self.screen, "blue", [0, j],[WINDOW_WIDTH, j],1)
+
     def gameOver(self) -> None:
         """
             Clears the screen and renders the Game Over message 
@@ -76,4 +96,90 @@ class Gui:
         # Centers this message on screen
         self.screen.blit(game_over_surface, ((WINDOW_WIDTH - game_over_surface.get_width()) // 2,
                                                 (WINDOW_HEIGHT - game_over_surface.get_height()) // 2))
-        pygame.display.update()
+        pygame.display.update() 
+        sleep(0.5)
+        pygame.quit()
+
+    async def getPlayerInput(self):
+        """ 
+            Asynchronous detection of player input, only used on the player Snake
+        """
+        while True:
+            for event in pygame.event.get():
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_UP and self.playerSnakeDirection != "Down":
+                        self.playerSnakeDirection = "Up"
+                        # print(self.playerSnakeDirection)
+                    elif event.key == pygame.K_DOWN and self.playerSnakeDirection != "Up":
+                        self.playerSnakeDirection = "Down"
+                        # print(self.playerSnakeDirection)
+                    elif event.key == pygame.K_LEFT and self.playerSnakeDirection != "Right":
+                        self.playerSnakeDirection = "Left"
+                        # print(self.playerSnakeDirection)
+                    elif event.key == pygame.K_RIGHT and self.playerSnakeDirection != "Left":
+                        self.playerSnakeDirection = "Right"
+                        # print(self.playerSnakeDirection)
+                    self.inputQueue.put({"input": self.playerSnakeDirection}) 
+            await asyncio.sleep(0.01)  # delay interval
+
+    def getGameInitInfo(self) -> None:
+        gotPlayerDirection : bool = False
+        gotSnakeCoordinates : bool = False
+        gotPreyCoordinates : bool = False
+        
+        while True:
+            try:
+                task = self.queue.get_nowait()
+                if "playerDirection" in task:
+                    self.playerSnakeDirection = task["playerDirection"]
+                    gotPlayerDirection = True
+                elif "move" in task:
+                    self.snakeCoordinates = task["move"]
+                    gotSnakeCoordinates = True
+                elif "prey" in task:
+                    self.preyCoordinates = task["prey"]
+                    gotPreyCoordinates = True
+
+                if gotPlayerDirection and gotSnakeCoordinates \
+                    and gotPreyCoordinates:
+                    self.queue.task_done()
+                    return
+            except queue.Empty:
+                pass
+    
+    async def gui_loop(self):
+        while True:
+            self.screen.fill(self.backgroundColor)
+            self.drawScreenGrid()
+
+            try:
+                while True:
+                    task = self.queue.get_nowait()
+                    if "game_over" in task:
+                        self.gameOver()
+                    elif "move" in task:
+                        self.snakeCoordinates = task["move"]
+                    elif "prey" in task:
+                        self.preyCoordinates = task["prey"]
+                    elif "score" in task:
+                        self.score = task["score"]
+                    self.queue.task_done()
+            except queue.Empty:
+                pass
+            finally:
+                self.renderPrey()
+                self.renderSnake()
+                self.renderScore()
+                pygame.display.update()
+            await asyncio.sleep(0.016)  # 60 fps
+
+
+
+
+
+
+
+        
+
+
+             
